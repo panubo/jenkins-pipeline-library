@@ -1,12 +1,15 @@
 def call() {
-    def dockerBuilds = []
+    def results = []
     // def utils = new com.panubo.Utils()
     if (fileExists('Dockerfile')) {
-        dockerBuilds = ['.']
+        results = ['.']
     } else {
-        dockerBuilds = sh(returnStdout: true, script: 'find . -maxdepth 2 -name Dockerfile -exec dirname {} \\;')
+        rawResults = sh(returnStdout: true, script: 'find . -maxdepth 2 -name Dockerfile -exec dirname {} \\;')
             .trim()
             .split(System.getProperty("line.separator"))
+        results = rawResults.collect{
+            it.replaceFirst(/\.\//, '')
+        }
     }
-    return dockerBuilds
+    return results
 }
