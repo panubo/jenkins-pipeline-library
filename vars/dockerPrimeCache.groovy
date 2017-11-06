@@ -1,5 +1,5 @@
 def call(Map params = [:]) {
-    def projectName = (params.containsKey('projectName') ? params.projectName : env.JOB_NAME).toLowerCase().replace(" ","")
+    def projectName = (params.containsKey('projectName') ? params.projectName : env.JOB_NAME).toLowerCase().replace(" ","").split("/")[0]
     def branch = params.containsKey('branch') ? params.branch : env.BRANCH_NAME
     def defaultBranch = params.containsKey('defaultBranch') ? params.defaultBranch : "master"
     def cacheBucket = params.containsKey('cacheBucket') ? params.cacheBucket : env.DOCKER_CACHE_BUCKET
