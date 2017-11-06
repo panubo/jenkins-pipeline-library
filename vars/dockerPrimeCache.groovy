@@ -1,6 +1,6 @@
 def call(Map params = [:]) {
     def projectName = (params.containsKey('projectName') ? params.projectName : env.JOB_NAME).toLowerCase().replace(" ","").split("/")[0]
-    def branch = params.containsKey('branch') ? params.branch : env.BRANCH_NAME
+    def branch = (params.containsKey('branch') ? params.branch : env.BRANCH_NAME).replace(" ","").replace("/","_")
     def defaultBranch = params.containsKey('defaultBranch') ? params.defaultBranch : "master"
     def cacheBucket = params.containsKey('cacheBucket') ? params.cacheBucket : env.DOCKER_CACHE_BUCKET
     def cacheBucketRegion = params.containsKey('cacheBucketRegion') ? params.cacheBucketRegion : env.DOCKER_CACHE_REGION
@@ -10,7 +10,7 @@ def call(Map params = [:]) {
         error 'dockerPrimeCache must be used as part of a Multibranch Pipeline *or* a `branch` argument must be provided'
     }
 
-    echo("Docker PRIME - ${projectName}")
+    echo("Docker PRIME - ${projectName} ${branch}")
 
     withAWS(region:cacheBucketRegion, credentials:cacheBucketCredentials) {
         def files = s3FindFiles(bucket:cacheBucket, glob:"${projectName}_*.tar.lz4")
