@@ -23,6 +23,7 @@ def call(body) {
     def dockerRegistry = config.containsKey('dockerRegistry') ? config.dockerRegistry : "docker.io"
     def version = config.containsKey('version') ? config.version : env.BRANCH_NAME
     def subDirectory = config.containsKey('subDirectory') ? config.subDirectory : '.'
+    boolean dryRun = config.containsKey('dryRun') ? config.dryRun : false
     
     if (version == null) {
         error 'buildDockerImages must be used as part of a Multibranch Pipeline *or* a `version` argument must be provided'
@@ -35,23 +36,6 @@ def call(body) {
 
             // Clean workspace
             deleteDir()
-
-            // stage('Checkout') {
-            //     scmVars = checkout([$class: 'GitSCM',
-            //         branches: [[name: 'refs/heads/master']],
-            //         doGenerateSubmoduleConfigurations: false,
-            //         userRemoteConfigs: [[
-            //             credentialsId: "${config.gitCredentials}",
-            //             url: "${config.gitUrl}"
-            //         ]]
-            //     ])
-            //     env.GIT_COMMIT = scmVars.GIT_COMMIT
-            //     env.GIT_BRANCH = scmVars.GIT_BRANCH
-            //     env.GIT_PREVIOUS_COMMIT = scmVars.GIT_PREVIOUS_COMMIT
-            //     env.GIT_PREVIOUS_SUCCESSFUL_COMMIT = scmVars.GIT_PREVIOUS_SUCCESSFUL_COMMIT
-            //     env.GIT_URL = scmVars.GIT_URL
-            //     sh 'printenv'
-            // }
 
             stage("Checkout") {
                 if (env.BRANCH_NAME) {
@@ -72,6 +56,7 @@ def call(body) {
                 }
             }
 
+            if (!dryRun) {
             stage('Push') {
                 /* Authentication is done like this due to a bug in docker-workflow-plugin https://issues.jenkins-ci.org/browse/JENKINS-41051 */
                 withCredentials([usernamePassword(credentialsId: 'dockerHub', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
@@ -81,6 +66,7 @@ def call(body) {
                     /* Push the container to the custom Registry */
                     dockerImage.push()
                 }
+            }
             }
         }
     }
