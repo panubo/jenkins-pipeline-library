@@ -41,9 +41,6 @@ def call(body) {
     node {
         withDockerEnv {
 
-            // Clean workspace
-            deleteDir()
-
             stage("Setup") {
                 if (env.BRANCH_NAME) {
                     checkout scm
