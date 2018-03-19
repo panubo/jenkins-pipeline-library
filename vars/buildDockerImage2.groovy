@@ -31,7 +31,7 @@ def call(body) {
 
     def artifacts    = config.containsKey('artifacts') ? config.artifacts : []
     def tagPolicy    = config.containsKey('tagPolicy') ? config.tagPolicy : "branchBuild"
-    def tagLatest    = config.containsKey('tagLatest') ? config.tagLatest : false
+    // def tagLatest    = config.containsKey('tagLatest') ? config.tagLatest : false
     def distribution = config.containsKey('distribution') ? config.distribution : null
 
     def credentialHelper = config.containsKey('credentialHelper') ? config.credentialHelper : "none"
@@ -54,12 +54,11 @@ def call(body) {
 
                 // Do credential helper here - login may be required for build
                 def dockerRegistry = artifacts[0].imageName.split('/')[0]
-                println dockerRegistry
                 switch (credentialHelper) {
                     case "none":
-                        println "Authentication basic docker login"
                         /* Authentication is done like this due to a bug in docker-workflow-plugin https://issues.jenkins-ci.org/browse/JENKINS-41051 */
                         if (credentialId) {
+                            println "Authentication basic docker login"
                             withCredentials([usernamePassword(credentialsId: credentialId, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
                                 sh('#!/bin/sh -e\necho "docker login -u $USERNAME -p ******** ' + dockerRegistry + '"\ndocker login -u $USERNAME -p $PASSWORD ' + dockerRegistry)
                             }                                
@@ -96,11 +95,11 @@ def call(body) {
                 def dockerImage
                 def dockerImageInspect
                 def dockerTags = []
-                if (tagLatest) {
-                    dockerTags.add("latest")
-                }
+                // if (tagLatest) {
+                //     dockerTags.add("latest")
+                // }
                 def imageName = it['imageName']
-                def workspace = it.containsKey('workspace') ? it.workspace : "."
+                def workspace = it.containsKey('workspace') ? it["workspace"].replaceAll('/+$', '') : "."
 
                 stage("Build ${imageName}") {
                     println "Building image: ${imageName} Workspace: ${workspace}"
@@ -143,9 +142,13 @@ def call(body) {
                         case "date":
                             println "tagging with date"
                             date = new Date().format('yyyyMMdd')
-                            if (distribution) {
+                            if (distribution && workspace == ".") {
                                 dockerTags.add(sprintf( '%s-%s', [distribution, date]))
                                 dockerTags.add(distribution)
+                            } else if (workspace != ".") {
+                                workspace_distribution = workspace.replaceAll("/", "-")
+                                dockerTags.add(sprintf( '%s-%s', [workspace_distribution, date]))
+                                dockerTags.add(workspace_distribution)
                             } else {
                                 dockerTags.add(date)
                             }
