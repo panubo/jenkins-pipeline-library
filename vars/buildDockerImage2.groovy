@@ -37,6 +37,11 @@ def call(body) {
     def credentialHelper = config.containsKey('credentialHelper') ? config.credentialHelper : "none"
     def credentialId     = config.containsKey('credentialId') ? config.credentialId : null
 
+    def cacheRegistry             = config.containsKey('cacheRegistry') ? config.cacheRegistry : null
+    def cacheRegistryHelper       = config.containsKey('cacheRegistryHelper') ? config.cacheRegistryHelper : "none"
+    def cacheRegistryCredentialId = config.containsKey('cacheRegistryCredentialId') ? config.cacheRegistryCredentialId : null
+    def cacheDefault              = config.containsKey('cacheDefault') ? config.cacheDefault : "master"
+
     def scmVars
     node {
         withDockerEnv {
@@ -54,40 +59,13 @@ def call(body) {
 
                 // Do credential helper here - login may be required for build
                 def dockerRegistry = artifacts[0].imageName.split('/')[0]
-                switch (credentialHelper) {
-                    case "none":
-                        /* Authentication is done like this due to a bug in docker-workflow-plugin https://issues.jenkins-ci.org/browse/JENKINS-41051 */
-                        if (credentialId) {
-                            println "Authentication basic docker login"
-                            withCredentials([usernamePassword(credentialsId: credentialId, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
-                                sh('#!/bin/sh -e\necho "docker login -u $USERNAME -p ******** ' + dockerRegistry + '"\ndocker login -u $USERNAME -p $PASSWORD ' + dockerRegistry)
-                            }                                
-                        }
-                        break
-                    case "ecr":
-                        println "Authentication aws ecr login"
-                        def awsRegion = dockerRegistry.split('\\.')[-3]
-                        withAWS(region: awsRegion, credentials: credentialId) {
-                            def login = ecrLogin()
-                            sh('#!/bin/sh -e\necho "docker login ********"\n' + login)
-                        }
-                        break
-                    case "gcr":
-                        println "Authentication gcloud login"
-                        if (credentialId) {
-                            withCredentials([file(credentialsId: credentialId, variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
-                                println "GCR login with credentials file"
-                                // Don't know if this is crazy or not
-                                def gcrCredentials = readJSON text: sh(returnStdout: true, script: "echo https://${dockerRegistry} | docker-credential-gcr get")
-                                sh('#!/bin/sh -e\necho "docker login -u '+ gcrCredentials['Username'] +' -p ******** https://' + dockerRegistry + '"\ndocker login -u '+ gcrCredentials['Username'] +' -p '+ gcrCredentials['Secret'] +' https://' + dockerRegistry)
-                            }
-                        } else {
-                            println "GCR login from metadata"
-                            // Don't know if this is crazy or not
-                            def gcrCredentials = readJSON text: sh(returnStdout: true, script: "echo https://${dockerRegistry} | docker-credential-gcr get")
-                            sh('#!/bin/sh -e\necho "docker login -u '+ gcrCredentials['Username'] +' -p ******** https://' + dockerRegistry + '"\ndocker login -u '+ gcrCredentials['Username'] +' -p '+ gcrCredentials['Secret'] +' https://' + dockerRegistry)
-                        }
-                        break
+                dockerLogin(dockerRegistry: dockerRegistry, credentialId: credentialId, credentialHelper: credentialHelper)
+
+                // If cacheRegistry do docker login
+                if (cacheRegistry) {
+                    def cacheDockerRegistry = cacheRegistry.split('/')[0]
+                    // TODO: skip this if all the same as above
+                    dockerLogin(dockerRegistry: cacheDockerRegistry, credentialId: cacheRegistryCredentialId, credentialHelper: cacheRegistryHelper)
                 }
             }
 
@@ -100,14 +78,65 @@ def call(body) {
                 // }
                 def imageName = it['imageName']
                 def workspace = it.containsKey('workspace') ? it["workspace"].replaceAll('/+$', '') : "."
+                def imageDisplayName
+                def cacheKeyPrefix
+                if (distribution && workspace == ".") {
+                    cacheKeyPrefix = sprintf( '%s-', [distribution])
+                    imageDisplayName = distribution
+                } else if (workspace != ".") {
+                    cacheKeyPrefix = sprintf( '%s-', [workspace.replaceAll("/", "-")])
+                    imageDisplayName = workspace.replaceAll("/", "-")
+                } else {
+                    cacheKeyPrefix = ""
+                    imageDisplayName = "base"
+                }
 
-                stage("Build ${imageName}") {
+
+                def cacheKey
+                def branch
+                def cacheFrom = ""
+
+                if (env.BRANCH_NAME) {
+                    branch = env.BRANCH_NAME
+                }
+                else {
+                    // This command will output "HEAD" if git is detached or a tag is checked out
+                    branch = sh(returnStdout: true, script: "git rev-parse --symbolic-full-name --abbrev-ref HEAD").trim()
+                }
+
+                // Do some cache priming
+                if (cacheRegistry) {
+                    def cacheCommand
+
+                    if (branch != "HEAD" && branch == cacheDefault) {
+                        cacheKey = sprintf( '%s%s', [cacheKeyPrefix, branch.replaceAll("/", "-")])
+                        cacheCommand = "docker pull ${cacheRegistry}:${cacheKey}"
+                        cacheFrom = "--cache-from ${cacheRegistry}:${cacheKey}"
+                    } else if (branch != "HEAD") {
+                        cacheKey = sprintf( '%s%s', [cacheKeyPrefix, branch.replaceAll("/", "-")])
+                        cacheKeyDefault = sprintf( '%s%s', [cacheKeyPrefix, cacheDefault.replaceAll("/", "-")])
+                        cacheCommand = "docker pull ${cacheRegistry}:${cacheKey} || docker pull ${cacheRegistry}:${cacheKeyDefault}"
+                        cacheFrom = "--cache-from ${cacheRegistry}:${cacheKey} --cache-from ${cacheRegistry}:${cacheKeyDefault}"
+                    } else {
+                        // if branch == "HEAD" we don't know what cache to pull in so use default only
+                        cacheKeyDefault = sprintf( '%s%s', [cacheKeyPrefix, cacheDefault.replaceAll("/", "-")])
+                        cacheCommand = "docker pull ${cacheRegistry}:${cacheKeyDefault}"
+                        cacheFrom = "--cache-from ${cacheRegistry}:${cacheKeyDefault}"
+                    }
+
+                    stage("Prime Cache ${imageDisplayName}") {
+                        // We don't want this to ever fail
+                        sh(script: sprintf("%s || true", [cacheCommand]))
+                    }
+                }
+
+                stage("Build ${imageDisplayName}") {
                     println "Building image: ${imageName} Workspace: ${workspace}"
-                    dockerImage = docker.build("${imageName}:latest", "--pull ${workspace}")
+                    dockerImage = docker.build("${imageName}:latest", sprintf("--pull %s %s", [cacheFrom, workspace])) // "--pull${cacheFrom} ${workspace}")
                     dockerImageInspect = readJSON text: sh(returnStdout: true, script: "docker image inspect --format '{{json . }}' ${imageName}:latest")
                 }
 
-                stage("Push ${imageName}") {
+                stage("Push ${imageDisplayName}") {
                     switch (tagPolicy) {
                         case "branchBuild":
                             println "tagging with branchBuild"
@@ -160,6 +189,13 @@ def call(body) {
                             println "Tagging and pushing ${imageName}:${it}"
                         } else {
                             dockerImage.push(it)
+                        }
+                    }
+
+                    if (cacheKey) {
+                        stage("Save Cache ${imageDisplayName}") {
+                            sh(script: sprintf("docker tag %s %s:%s", [dockerImageInspect['Id'], cacheRegistry, cacheKey]))
+                            sh(script: "docker push ${cacheRegistry}:${cacheKey}")
                         }
                     }
                 }
