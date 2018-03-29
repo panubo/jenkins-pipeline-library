@@ -9,6 +9,9 @@
  *     distribution = null
  *     credentialHelper = "none"
  *     credentialId = null # Set the credentials for the helper. Credentials should be u/p for ecr or file for gcr
+ *     cacheRegistry = null # Set to enable image caching, this should not be the same repo as the final image
+ *     cacheRegistryHelper = "none" # Only required it the cache registry is different from the main image registry
+ *     cacheRegistryCredentialId = null
  *     artifacts = [ # Multiple related artifacts can be built, all will received the same tag
  *       [imageName: "", workspace: "."]
  *     ]
@@ -16,7 +19,6 @@
  * }
  */
 
-// TODO: Add image cache support
 // TODO: Add alternate Dockerfile name support
 
 def call(body) {
