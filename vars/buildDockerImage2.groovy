@@ -165,7 +165,7 @@ def call(body) {
                         case "version":
                             println "tagging with version"
                             def gitDescribe = sh(returnStdout: true, script: "git describe --abbrev=1 --tags --always").trim()
-                            def versionParse = (gitDescribe =~ /^(\d+)\.(\d+)\.(\d+)(\-(\d+))?$/)
+                            def versionParse = (gitDescribe =~ /^v?(\d+)\.(\d+)\.(\d+)(\-(\d+))?$/)
                             if (versionParse.size() == 1) {
                                 dockerTags.add(sprintf( '%s.%s.%s', [versionParse[0][1], versionParse[0][2], versionParse[0][3]]))
                                 dockerTags.add(sprintf( '%s.%s', [versionParse[0][1], versionParse[0][2]]))
