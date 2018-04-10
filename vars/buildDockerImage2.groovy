@@ -75,11 +75,15 @@ def call(body) {
                 def dockerImage
                 def dockerImageInspect
                 def dockerTags = []
+                def buildOps = []
+                buildOps.add("--pull")
                 // if (tagLatest) {
                 //     dockerTags.add("latest")
                 // }
                 def imageName = it['imageName']
                 def workspace = it.containsKey('workspace') ? it["workspace"].replaceAll('/+$', '') : "."
+                def dockerfile = it.containsKey('dockerfile') ? it["dockerfile"] : "Dockerfile"
+                buildOps.add("-f ${workspace}/${dockerfile}")
                 def imageDisplayName
                 def cacheKeyPrefix
                 if (distribution && workspace == ".") {
@@ -96,7 +100,6 @@ def call(body) {
 
                 def cacheKey
                 def branch
-                def cacheFrom = ""
 
                 if (env.BRANCH_NAME) {
                     branch = env.BRANCH_NAME
@@ -113,17 +116,17 @@ def call(body) {
                     if (branch != "HEAD" && branch == cacheDefault) {
                         cacheKey = sprintf( '%s%s', [cacheKeyPrefix, branch.replaceAll("/", "-")])
                         cacheCommand = "docker pull ${cacheRegistry}:${cacheKey}"
-                        cacheFrom = "--cache-from ${cacheRegistry}:${cacheKey}"
+                        buildOps.add("--cache-from ${cacheRegistry}:${cacheKey}")
                     } else if (branch != "HEAD") {
                         cacheKey = sprintf( '%s%s', [cacheKeyPrefix, branch.replaceAll("/", "-")])
                         cacheKeyDefault = sprintf( '%s%s', [cacheKeyPrefix, cacheDefault.replaceAll("/", "-")])
                         cacheCommand = "docker pull ${cacheRegistry}:${cacheKey} || docker pull ${cacheRegistry}:${cacheKeyDefault}"
-                        cacheFrom = "--cache-from ${cacheRegistry}:${cacheKey} --cache-from ${cacheRegistry}:${cacheKeyDefault}"
+                        buildOps.add("--cache-from ${cacheRegistry}:${cacheKey} --cache-from ${cacheRegistry}:${cacheKeyDefault}")
                     } else {
                         // if branch == "HEAD" we don't know what cache to pull in so use default only
                         cacheKeyDefault = sprintf( '%s%s', [cacheKeyPrefix, cacheDefault.replaceAll("/", "-")])
                         cacheCommand = "docker pull ${cacheRegistry}:${cacheKeyDefault}"
-                        cacheFrom = "--cache-from ${cacheRegistry}:${cacheKeyDefault}"
+                        buildOps.add("--cache-from ${cacheRegistry}:${cacheKeyDefault}")
                     }
 
                     stage("Prime Cache ${imageDisplayName}") {
@@ -134,7 +137,7 @@ def call(body) {
 
                 stage("Build ${imageDisplayName}") {
                     println "Building image: ${imageName} Workspace: ${workspace}"
-                    dockerImage = docker.build("${imageName}:latest", sprintf("--pull %s %s", [cacheFrom, workspace])) // "--pull${cacheFrom} ${workspace}")
+                    dockerImage = docker.build("${imageName}:latest", sprintf("%s %s", [buildOps.join(' '), workspace]))
                     dockerImageInspect = readJSON text: sh(returnStdout: true, script: "docker image inspect --format '{{json . }}' ${imageName}:latest")
                 }
 
