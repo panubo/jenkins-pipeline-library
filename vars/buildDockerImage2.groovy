@@ -46,18 +46,22 @@ def call(body) {
 
     def scmVars
     node {
+
+        stage("Checkout") {
+            if (env.BRANCH_NAME) {
+                checkout scm
+            }
+            else if ((env.BRANCH_NAME == null) && (repo)) {
+                git repo
+            }
+            else {
+                error 'buildPlugin must be used as part of a Multibranch Pipeline *or* a `repo` argument must be provided'
+            }
+        }
+
         withDockerEnv {
 
             stage("Setup") {
-                if (env.BRANCH_NAME) {
-                    checkout scm
-                }
-                else if ((env.BRANCH_NAME == null) && (repo)) {
-                    git repo
-                }
-                else {
-                    error 'buildPlugin must be used as part of a Multibranch Pipeline *or* a `repo` argument must be provided'
-                }
 
                 // Do credential helper here - login may be required for build
                 def dockerRegistry = artifacts[0].imageName.split('/')[0]
