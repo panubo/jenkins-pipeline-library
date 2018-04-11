@@ -20,13 +20,12 @@ def call(body) {
     def repo       = config.containsKey('repo') ? config.repo : null
     boolean dryRun = config.containsKey('dryRun') ? config.dryRun : false
 
-    def helmRepoName     = config.containsKey('helmRepoName')     ? config.helmRepoName     : null
-    def helmRepoURL      = config.containsKey('helmRepoURL')      ? config.helmRepoURL      : null
-    def credentialId     = config.containsKey('credentialId')     ? config.credentialId     : null
+    def helmRepoName    = config.containsKey('helmRepoName')    ? config.helmRepoName    : null
+    def helmRepoURL     = config.containsKey('helmRepoURL')     ? config.helmRepoURL     : null
+    def helmEnvironment = config.containsKey('helmEnvironment') ? config.helmEnvironment : []
+    def credentialId    = config.containsKey('credentialId')    ? config.credentialId    : null
 
     def charts = config.containsKey('charts') ? config.charts : []
-
-    // def helmEnvironment = config.containsKey('helmEnvironment') ? config.helmEnvironment : null
 
     node {
 
@@ -60,36 +59,51 @@ def call(body) {
             }
 
             withCredentials(credentials) {
-                //withEnv(helmEnvironment) {
+                withEnv(helmEnvironment) {
+                    def index
 
-                stage("Setup") {
-                    /* Jenkins doesn't run the entrypoint so we run it here - or something odd seems to happen */
-                    sh("/entry.sh true")
+                    stage("Setup") {
+                        /* Jenkins doesn't run the entrypoint so we run it here - or something odd seems to happen */
+                        sh("/entry.sh true")
 
-                    sh("helm repo add ${helmRepoName} ${helmRepoURL}")
-                    sh("helm repo update")
-                }
-
-                charts.each {
-                    def workspace = it['workspace'].replaceAll('/+$', '')
-                    def chDir = "cd ${workspace} && "
-                    def chart = readYaml(file: workspace + "/Chart.yaml")
-
-                    stage("Lint ${chart.name}") {
-                        sh("helm lint ${workspace}")
-                        sh(chDir + "helm dependency build")
+                        sh("helm repo add ${helmRepoName} ${helmRepoURL}")
+                        sh("helm repo update")
+                        // Return the the repo index - doing this in a shell because its only present in the docker container, $HOME is also different inside and outside the container
+                        index = readYaml(text: sh(returnStdout: true, script: sprintf('cat $HOME/.helm/repository/cache/%s-index.yaml', [helmRepoName])))
                     }
 
-                    stage("Package ${chart.name}") {
-                        sh("helm package ${workspace} --debug")
-                    }
+                    charts.each {
+                        def workspace = it['workspace'].replaceAll('/+$', '')
+                        def chDir = "cd ${workspace} && "
+                        def chart = readYaml(file: workspace + "/Chart.yaml")
+                        boolean skip = false
 
-                    stage("Publish ${chart.name}") {
-                        def pushCmd = "helm ${repoPlugin} push ${chart.name}-${chart.version}.tgz ${helmRepoName}"
-                        if (dryRun) {
-                            echo(pushCmd)
-                        } else {
-                            sh(pushCmd)
+                        if (index['entries'][chart.name].any { entry -> entry.version == chart.version }) {
+                            echo("Skipping package and publish as version already exists in index.")
+                            skip = true
+                        }
+
+                        stage("Lint ${chart.name}") {
+                            sh("helm lint ${workspace}")
+                            sh(chDir + "helm dependency build")
+                        }
+
+                        stage("Package ${chart.name}") {
+                            if (skip) {
+                                echo("SKIP")
+                            } else {
+                                sh("helm package ${workspace} --debug")
+                            }
+                        }
+
+                        stage("Publish ${chart.name}") {
+                            def pushCmd = "helm ${repoPlugin} push ${chart.name}-${chart.version}.tgz ${helmRepoName}"
+                            if (dryRun || skip) {
+                                echo("DRYRUN or SKIP")
+                                echo(pushCmd)
+                            } else {
+                                sh(pushCmd)
+                            }
                         }
                     }
                 }
